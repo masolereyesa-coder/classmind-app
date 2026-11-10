@@ -1,0 +1,13 @@
+*.class
+*.log
+*.pyc
+.DS_Store
+.idea/
+.vscode/
+**/doc/api/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
