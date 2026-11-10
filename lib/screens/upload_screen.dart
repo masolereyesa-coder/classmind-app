@@ -1,139 +1,278 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import '../services/api_service.dart';
 import '../models/subject.dart';
+import '../models/note.dart';
+import '../services/api_service.dart';
 import '../l10n/strings.dart';
+import 'note_screen.dart';
 
 class UploadScreen extends StatefulWidget {
-  final Subject? preselectedSubject;
-  const UploadScreen({super.key, this.preselectedSubject});
+  final Subject subject;
+  const UploadScreen({super.key, required this.subject});
+
   @override
   State<UploadScreen> createState() => _UploadScreenState();
 }
 
 class _UploadScreenState extends State<UploadScreen> {
-  List<Subject> _subjects = [];
-  Subject? _selectedSubject;
   String? _filePath;
   String? _fileName;
-  bool _loading = false;
   bool _processing = false;
-  String _status = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedSubject = widget.preselectedSubject;
-    _loadSubjects();
-  }
-
-  Future<void> _loadSubjects() async {
-    setState(() => _loading = true);
-    try {
-      final subs = await ApiService.getSubjects();
-      setState(() {
-        _subjects = subs;
-        if (_selectedSubject == null && subs.isNotEmpty) _selectedSubject = subs.first;
-      });
-    } catch (_) {}
-    setState(() => _loading = false);
-  }
+  String? _error;
 
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'mp4'],
+      allowedExtensions: ['mp3', 'mp4', 'wav', 'm4a', 'ogg', 'webm', 'flac'],
+      allowMultiple: false,
     );
-    if (result != null && result.files.single.path != null) {
-      setState(() { _filePath = result.files.single.path; _fileName = result.files.single.name; });
-    }
+    if (result == null || result.files.isEmpty) return;
+    setState(() {
+      _filePath = result.files.first.path;
+      _fileName = result.files.first.name;
+      _error = null;
+    });
   }
 
   Future<void> _process() async {
-    if (_filePath == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.noFileSelected))); return; }
-    if (_selectedSubject == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.error))); return; }
-    setState(() { _processing = true; _status = S.processing; });
+    if (_filePath == null) return;
+    setState(() {
+      _processing = true;
+      _error = null;
+    });
     try {
-      final note = await ApiService.processAudio(_filePath!, _selectedSubject!.id);
+      final note = await ApiService.processAudio(_filePath!, widget.subject.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.processing), backgroundColor: Colors.green));
-      Navigator.pop(context);
-      Navigator.pushNamed(context, '/note', arguments: note);
+      // ✅ Show success message (fixed from "Procesando..." bug)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(S.notesGenerated),
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      // Navigate to note screen and remove upload screen from stack
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => NoteScreen(note: note)),
+      );
     } catch (e) {
-      setState(() { _processing = false; _status = ''; });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${S.error}: ${e.toString().replaceFirst("Exception: ", "")}'), backgroundColor: Colors.red));
+      if (!mounted) return;
+      setState(() {
+        _processing = false;
+        _error = e.toString();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final hasFile = _filePath != null;
+
     return Scaffold(
-      appBar: AppBar(title: Text(S.uploadAudio)),
-      body: _loading ? const Center(child: CircularProgressIndicator())
-          : _processing
-              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const SizedBox(width: 80, height: 80, child: CircularProgressIndicator(strokeWidth: 6)),
-                  const SizedBox(height: 32),
-                  Text(_status, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-                ]))
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('1. ${S.selectFile}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 12),
-                      GestureDetector(
-                        onTap: _pickFile,
-                        child: Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey.shade700, width: 2),
-                            borderRadius: BorderRadius.circular(16),
-                            color: _filePath != null ? const Color(0xFF6C63FF).withOpacity(0.1) : const Color(0xFF1E1E1E),
-                          ),
-                          child: Column(children: [
-                            Icon(_filePath != null ? Icons.audio_file : Icons.upload_file, size: 48, color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey),
-                            const SizedBox(height: 8),
-                            Text(_fileName ?? S.noFileSelected,
-                              style: TextStyle(color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey,
-                                fontWeight: _filePath != null ? FontWeight.bold : FontWeight.normal),
-                              textAlign: TextAlign.center),
-                            if (_filePath == null) ...[const SizedBox(height: 4), const Text('MP3, M4A, WAV, AAC', style: TextStyle(color: Colors.grey, fontSize: 12))],
-                          ]),
-                        ),
+      appBar: AppBar(
+        title: Text(S.uploadAudio),
+        backgroundColor: colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Subject info card
+            Card(
+              color: colorScheme.primary.withOpacity(0.08),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.school_outlined,
+                        color: colorScheme.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(widget.subject.name,
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: colorScheme.primary)),
+                          if (widget.subject.professorName.isNotEmpty)
+                            Text(
+                              '${S.prof}${widget.subject.professorName}',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color:
+                                      colorScheme.primary.withOpacity(0.7)),
+                            ),
+                        ],
                       ),
-                      const SizedBox(height: 28),
-                      Text('2. ${S.subjectName}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<Subject>(
-                        value: _selectedSubject,
-                        decoration: const InputDecoration(prefixIcon: Icon(Icons.menu_book)),
-                        hint: Text(S.subjectName),
-                        dropdownColor: const Color(0xFF1E1E1E),
-                        items: _subjects.map((s) => DropdownMenuItem(value: s, child: Text(s.name))).toList(),
-                        onChanged: (s) => setState(() => _selectedSubject = s),
+                    ),
+                    if (widget.subject.hasPdf)
+                      Tooltip(
+                        message: S.pdfLoadedDesc,
+                        child: Icon(Icons.picture_as_pdf,
+                            color: Colors.green.shade600, size: 20),
                       ),
-                      const SizedBox(height: 40),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: Colors.blue.shade900.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
-                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Icon(Icons.info_outline, color: Colors.blue.shade300, size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text('Whisper AI transcribira el audio. La IA generara notas estructuradas con conceptos clave, resumen y preguntas de examen.', style: TextStyle(color: Colors.blue.shade300, fontSize: 13))),
-                        ]),
-                      ),
-                      const SizedBox(height: 32),
-                      SizedBox(height: 56,
-                        child: ElevatedButton.icon(
-                          onPressed: (_filePath != null && _selectedSubject != null) ? _process : null,
-                          icon: const Icon(Icons.auto_awesome),
-                          label: Text(S.process, style: const TextStyle(fontSize: 16)),
-                        )),
-                    ],
-                  ),
+                  ],
                 ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // PDF enrichment hint
+            if (widget.subject.hasPdf)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_awesome,
+                        size: 14, color: Colors.green.shade600),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        S.pdfLoadedDesc,
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.green.shade700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 24),
+
+            // File picker area
+            GestureDetector(
+              onTap: _processing ? null : _pickFile,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                height: 160,
+                decoration: BoxDecoration(
+                  color: hasFile
+                      ? colorScheme.primary.withOpacity(0.07)
+                      : Colors.grey.shade50,
+                  border: Border.all(
+                    color: hasFile
+                        ? colorScheme.primary
+                        : Colors.grey.shade300,
+                    width: hasFile ? 2 : 1.5,
+                    // ignore: deprecated_member_use
+                    strokeAlign: BorderSide.strokeAlignInside,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      hasFile
+                          ? Icons.audio_file
+                          : Icons.upload_file_outlined,
+                      size: 48,
+                      color: hasFile
+                          ? colorScheme.primary
+                          : Colors.grey.shade400,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      hasFile
+                          ? (_fileName ?? S.selectFile)
+                          : S.selectFile,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: hasFile
+                            ? colorScheme.primary
+                            : Colors.grey.shade600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (!hasFile) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'MP3, MP4, WAV, M4A, OGG…',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade400),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Error message
+            if (_error != null)
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border:
+                      Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline,
+                        color: Colors.red.shade600, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                            color: Colors.red.shade700, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            const Spacer(),
+
+            // Process button
+            SizedBox(
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed:
+                    (!hasFile || _processing) ? null : _process,
+                icon: _processing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.auto_awesome),
+                label: Text(
+                  _processing ? S.processing : S.process,
+                  style: const TextStyle(fontSize: 16),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colorScheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  disabledBackgroundColor: Colors.grey.shade200,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_processing)
+              Text(
+                S.processing,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                    fontStyle: FontStyle.italic),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

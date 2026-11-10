@@ -53,12 +53,28 @@ class S {
   static String get qaBtn          => isEnglish ? 'Q&A' : 'Q&A';
   static String get prof           => isEnglish ? 'Prof. ' : 'Prof. ';
 
+  // PDF
+  static String get uploadPdf        => isEnglish ? 'Upload slides (PDF)' : 'Subir diapositivas (PDF)';
+  static String get pdfLoaded        => isEnglish ? 'Slides loaded' : 'Diapositivas cargadas';
+  static String get pdfLoadedDesc    => isEnglish ? 'The AI will use the slides to enrich class notes.' : 'La IA usara las diapositivas para enriquecer las notas.';
+  static String get changePdf        => isEnglish ? 'Change PDF' : 'Cambiar PDF';
+  static String get deletePdf        => isEnglish ? 'Remove PDF' : 'Eliminar PDF';
+  static String get pdfUploaded      => isEnglish ? 'PDF uploaded successfully!' : '¡PDF subido correctamente!';
+  static String get pdfDeleted       => isEnglish ? 'PDF removed' : 'PDF eliminado';
+  static String get pdfError         => isEnglish ? 'Error uploading PDF' : 'Error al subir el PDF';
+  static String get uploadingPdf     => isEnglish ? 'Uploading PDF...' : 'Subiendo PDF...';
+  static String get noPdf            => isEnglish ? 'No slides yet' : 'Sin diapositivas aun';
+  static String get pdfHint          => isEnglish
+      ? 'Upload the class presentation so the AI combines it with the audio for better notes.'
+      : 'Sube la presentacion de la clase para que la IA la combine con el audio y genere mejores notas.';
+
   // Upload screen
   static String get uploadAudio    => isEnglish ? 'Upload Audio' : 'Subir Audio';
   static String get selectFile     => isEnglish ? 'Select audio file' : 'Seleccionar archivo de audio';
   static String get noFileSelected => isEnglish ? 'No file selected' : 'Ningun archivo seleccionado';
   static String get process        => isEnglish ? 'Process' : 'Procesar';
   static String get processing     => isEnglish ? 'Processing... this may take a few minutes' : 'Procesando... puede tardar unos minutos';
+  static String get notesGenerated => isEnglish ? 'Notes generated successfully!' : '¡Notas generadas correctamente!';
 
   // Note screen
   static String get notes          => isEnglish ? 'Notes' : 'Notas';
