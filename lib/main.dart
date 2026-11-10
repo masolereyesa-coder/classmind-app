@@ -86,7 +86,7 @@ class ClassMindApp extends StatelessWidget {
         },
         onGenerateRoute: (settings) {
           if (settings.name == '/subject') return MaterialPageRoute(builder: (ctx) => SubjectScreen(subject: settings.arguments as dynamic));
-          if (settings.name == '/upload')  return MaterialPageRoute(builder: (ctx) => UploadScreen(preselectedSubject: settings.arguments as dynamic));
+          if (settings.name == '/upload')  return MaterialPageRoute(builder: (ctx) => UploadScreen(subject: settings.arguments as dynamic));
           if (settings.name == '/note')    return MaterialPageRoute(builder: (ctx) => NoteScreen(note: settings.arguments as dynamic));
           if (settings.name == '/qa')      return MaterialPageRoute(builder: (ctx) => QAScreen(subject: settings.arguments as dynamic));
           return null;
