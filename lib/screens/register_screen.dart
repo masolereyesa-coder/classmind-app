@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../l10n/strings.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -8,23 +9,23 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _nameCtrl = TextEditingController();
+  final _nameCtrl  = TextEditingController();
   final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
+  final _passCtrl  = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
   String? _error;
 
   Future<void> _register() async {
     if (_nameCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
-      setState(() => _error = 'Completa todos los campos');
+      setState(() => _error = S.fillAllFields);
       return;
     }
     setState(() { _loading = true; _error = null; });
     try {
       await ApiService.register(_nameCtrl.text.trim(), _emailCtrl.text.trim(), _passCtrl.text);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cuenta creada! Inicia sesion')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.accountCreated)));
       Navigator.pop(context);
     } catch (e) {
       setState(() { _error = e.toString().replaceFirst('Exception: ', ''); });
@@ -39,7 +40,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Crear cuenta')),
+      appBar: AppBar(title: Text(S.createAccount)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -49,20 +50,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
             if (_error != null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade200)),
-                child: Text(_error!, style: TextStyle(color: Colors.red.shade700)),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade900.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade700),
+                ),
+                child: Text(_error!, style: TextStyle(color: Colors.red.shade300)),
               ),
               const SizedBox(height: 16),
             ],
             TextField(controller: _nameCtrl, textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'Nombre completo', prefixIcon: Icon(Icons.person_outlined))),
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(labelText: S.fullName, prefixIcon: const Icon(Icons.person_outlined))),
             const SizedBox(height: 16),
             TextField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Correo electronico', prefixIcon: Icon(Icons.email_outlined))),
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(labelText: S.email, prefixIcon: const Icon(Icons.email_outlined))),
             const SizedBox(height: 16),
             TextField(controller: _passCtrl, obscureText: _obscure,
+              style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                labelText: 'Contrasena (min. 6 caracteres)',
+                labelText: S.passwordHint,
                 prefixIcon: const Icon(Icons.lock_outlined),
                 suffixIcon: IconButton(
                   icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
@@ -75,7 +83,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 onPressed: _loading ? null : _register,
                 child: _loading
                     ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Crear cuenta', style: TextStyle(fontSize: 16)),
+                    : Text(S.createAccount, style: const TextStyle(fontSize: 16)),
               )),
           ],
         ),

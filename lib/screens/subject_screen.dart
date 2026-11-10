@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../models/subject.dart';
 import '../models/note.dart';
+import '../l10n/strings.dart';
 
 class SubjectScreen extends StatefulWidget {
   final Subject subject;
@@ -23,7 +24,7 @@ class _SubjectScreenState extends State<SubjectScreen> {
       final notes = await ApiService.getNotes(subjectId: widget.subject.id);
       setState(() => _notes = notes);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al cargar notas')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.error)));
     } finally { setState(() => _loading = false); }
   }
 
@@ -31,12 +32,12 @@ class _SubjectScreenState extends State<SubjectScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Eliminar nota'),
-        content: const Text('Eliminar esta nota de clase?'),
+        title: Text(S.deleteNote),
+        content: Text(S.deleteNoteQ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(S.cancel)),
           TextButton(style: TextButton.styleFrom(foregroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true), child: const Text('Eliminar')),
+            onPressed: () => Navigator.pop(ctx, true), child: Text(S.delete)),
         ],
       ),
     );
@@ -44,7 +45,7 @@ class _SubjectScreenState extends State<SubjectScreen> {
   }
 
   String _formatDate(String iso) {
-    try { final d = DateTime.parse(iso); return '\${d.day}/\${d.month}/\${d.year}'; }
+    try { final d = DateTime.parse(iso); return '${d.day} ${S.month(d.month)} ${d.year}'; }
     catch (_) { return iso.split('T').first; }
   }
 
@@ -56,7 +57,7 @@ class _SubjectScreenState extends State<SubjectScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.question_answer_outlined),
-            tooltip: 'Preguntar IA',
+            tooltip: S.qaBtn,
             onPressed: () => Navigator.pushNamed(context, '/qa', arguments: widget.subject),
           ),
         ],
@@ -73,9 +74,9 @@ class _SubjectScreenState extends State<SubjectScreen> {
                     child: Row(children: [
                       const Icon(Icons.person, color: Colors.white70, size: 18),
                       const SizedBox(width: 8),
-                      Text('Prof. \${widget.subject.professorName}', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                      Text('${S.prof}${widget.subject.professorName}', style: const TextStyle(color: Colors.white, fontSize: 14)),
                       const Spacer(),
-                      Text('\${_notes.length} notas', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                      Text('${_notes.length} ${S.notes.toLowerCase()}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
                     ]),
                   ),
                 Expanded(
@@ -83,14 +84,14 @@ class _SubjectScreenState extends State<SubjectScreen> {
                       ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                           const Icon(Icons.note_add_outlined, size: 80, color: Colors.grey),
                           const SizedBox(height: 16),
-                          const Text('No hay notas aun', style: TextStyle(fontSize: 18, color: Colors.grey)),
+                          Text(S.noNotes, style: const TextStyle(fontSize: 18, color: Colors.grey)),
                           const SizedBox(height: 8),
-                          const Text('Graba o sube un audio de clase', style: TextStyle(color: Colors.grey)),
+                          Text(S.uploadFirst, style: const TextStyle(color: Colors.grey)),
                           const SizedBox(height: 24),
                           ElevatedButton.icon(
                             onPressed: () => Navigator.pushNamed(context, '/upload', arguments: widget.subject).then((_) => _load()),
                             icon: const Icon(Icons.mic),
-                            label: const Text('Subir audio'),
+                            label: Text(S.uploadAudio),
                           ),
                         ]))
                       : RefreshIndicator(
@@ -114,7 +115,7 @@ class _SubjectScreenState extends State<SubjectScreen> {
                                     ),
                                     child: const Icon(Icons.description_outlined, color: Color(0xFF6C63FF)),
                                   ),
-                                  title: Text('Clase del \${_formatDate(n.createdAt)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  title: Text('${S.classNotes}: ${_formatDate(n.createdAt)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                                   subtitle: Row(children: [
                                     const Icon(Icons.timer_outlined, size: 14, color: Colors.grey),
                                     const SizedBox(width: 4),
@@ -133,7 +134,7 @@ class _SubjectScreenState extends State<SubjectScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.pushNamed(context, '/upload', arguments: widget.subject).then((_) => _load()),
         icon: const Icon(Icons.mic),
-        label: const Text('Subir audio'),
+        label: Text(S.uploadAudio),
       ),
     );
   }

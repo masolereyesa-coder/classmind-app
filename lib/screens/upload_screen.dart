@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import '../models/subject.dart';
-import '../models/note.dart';
+import '../l10n/strings.dart';
 
 class UploadScreen extends StatefulWidget {
   final Subject? preselectedSubject;
@@ -50,57 +50,52 @@ class _UploadScreenState extends State<UploadScreen> {
   }
 
   Future<void> _process() async {
-    if (_filePath == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecciona un archivo de audio'))); return; }
-    if (_selectedSubject == null) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecciona una materia'))); return; }
-    setState(() { _processing = true; _status = 'Subiendo audio...'; });
+    if (_filePath == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.noFileSelected))); return; }
+    if (_selectedSubject == null) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.error))); return; }
+    setState(() { _processing = true; _status = S.processing; });
     try {
-      setState(() => _status = 'Transcribiendo con Whisper AI...');
       final note = await ApiService.processAudio(_filePath!, _selectedSubject!.id);
-      setState(() => _status = 'Listo! Notas generadas');
-      await Future.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notas generadas exitosamente!'), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(S.processing), backgroundColor: Colors.green));
       Navigator.pop(context);
       Navigator.pushNamed(context, '/note', arguments: note);
     } catch (e) {
       setState(() { _processing = false; _status = ''; });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: \${e.toString().replaceFirst("Exception: ", "")}'), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${S.error}: ${e.toString().replaceFirst("Exception: ", "")}'), backgroundColor: Colors.red));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Subir audio de clase')),
+      appBar: AppBar(title: Text(S.uploadAudio)),
       body: _loading ? const Center(child: CircularProgressIndicator())
           : _processing
               ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                   const SizedBox(width: 80, height: 80, child: CircularProgressIndicator(strokeWidth: 6)),
                   const SizedBox(height: 32),
                   Text(_status, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-                  const SizedBox(height: 12),
-                  const Text('Esto puede tardar unos minutos\ndependiendo del largo del audio', style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
                 ]))
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text('1. Selecciona el audio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('1. ${S.selectFile}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
                       GestureDetector(
                         onTap: _pickFile,
                         child: Container(
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            border: Border.all(color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey.shade300, width: 2),
+                            border: Border.all(color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey.shade700, width: 2),
                             borderRadius: BorderRadius.circular(16),
-                            color: _filePath != null ? const Color(0xFF6C63FF).withOpacity(0.05) : Colors.grey.shade50,
+                            color: _filePath != null ? const Color(0xFF6C63FF).withOpacity(0.1) : const Color(0xFF1E1E1E),
                           ),
                           child: Column(children: [
                             Icon(_filePath != null ? Icons.audio_file : Icons.upload_file, size: 48, color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey),
                             const SizedBox(height: 8),
-                            Text(_fileName ?? 'Toca para seleccionar archivo',
+                            Text(_fileName ?? S.noFileSelected,
                               style: TextStyle(color: _filePath != null ? const Color(0xFF6C63FF) : Colors.grey,
                                 fontWeight: _filePath != null ? FontWeight.bold : FontWeight.normal),
                               textAlign: TextAlign.center),
@@ -109,23 +104,24 @@ class _UploadScreenState extends State<UploadScreen> {
                         ),
                       ),
                       const SizedBox(height: 28),
-                      const Text('2. Selecciona la materia', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('2. ${S.subjectName}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<Subject>(
                         value: _selectedSubject,
                         decoration: const InputDecoration(prefixIcon: Icon(Icons.menu_book)),
-                        hint: const Text('Elige una materia'),
+                        hint: Text(S.subjectName),
+                        dropdownColor: const Color(0xFF1E1E1E),
                         items: _subjects.map((s) => DropdownMenuItem(value: s, child: Text(s.name))).toList(),
                         onChanged: (s) => setState(() => _selectedSubject = s),
                       ),
                       const SizedBox(height: 40),
                       Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
+                        decoration: BoxDecoration(color: Colors.blue.shade900.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
                         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                          Icon(Icons.info_outline, color: Colors.blue.shade300, size: 20),
                           const SizedBox(width: 10),
-                          const Expanded(child: Text('Whisper AI transcribira el audio en espanol. La IA generara notas estructuradas con conceptos clave, resumen y preguntas de examen.', style: TextStyle(color: Colors.blue, fontSize: 13))),
+                          Expanded(child: Text('Whisper AI transcribira el audio. La IA generara notas estructuradas con conceptos clave, resumen y preguntas de examen.', style: TextStyle(color: Colors.blue.shade300, fontSize: 13))),
                         ]),
                       ),
                       const SizedBox(height: 32),
@@ -133,7 +129,7 @@ class _UploadScreenState extends State<UploadScreen> {
                         child: ElevatedButton.icon(
                           onPressed: (_filePath != null && _selectedSubject != null) ? _process : null,
                           icon: const Icon(Icons.auto_awesome),
-                          label: const Text('Procesar y generar notas', style: TextStyle(fontSize: 16)),
+                          label: Text(S.process, style: const TextStyle(fontSize: 16)),
                         )),
                     ],
                   ),
