@@ -55,7 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             TextField(
               controller: _urlController,
               decoration: const InputDecoration(
-                hintText: 'https://classmind-api.onrender.com/api/v1',
+                hintText: 'https://classmind-backend-umtc.onrender.com/api/v1',
                 border: OutlineInputBorder(),
               ),
             ),

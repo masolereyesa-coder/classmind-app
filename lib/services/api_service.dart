@@ -6,7 +6,7 @@ import '../models/subject.dart';
 import '../models/note.dart';
 
 class ApiService {
-  static String _baseUrl = 'https://classmind-api.onrender.com/api/v1';
+  static String _baseUrl = 'https://classmind-backend-umtc.onrender.com/api/v1';
   static String? _token;
 
   static Future<void> init() async {
