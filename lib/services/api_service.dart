@@ -6,22 +6,54 @@ import '../models/subject.dart';
 import '../models/note.dart';
 
 class ApiService {
-  static String _baseUrl = 'https://classmind-backend-umtc.onrender.com/api/v1';
+  static const String _productionUrl =
+      'https://classmind-backend-umtc.onrender.com/api/v1';
+  static String _baseUrl = _productionUrl;
   static String? _token;
+
+  /// Normaliza la URL: elimina trailing slash y asegura que termine en /api/v1
+  static String _normalizeUrl(String url) {
+    url = url.trim().replaceAll(RegExp(r'/+$'), ''); // quita trailing slashes
+    if (!url.endsWith('/api/v1')) {
+      // Si termina en /api (sin /v1) o no tiene el path en absoluto
+      if (url.endsWith('/api')) {
+        url = '$url/v1';
+      } else if (!url.contains('/api/v1')) {
+        url = '$url/api/v1';
+      }
+    }
+    return url;
+  }
+
+  /// Devuelve true si la URL parece una IP local o localhost
+  static bool _isLocalUrl(String url) {
+    return url.contains('192.168.') ||
+        url.contains('10.0.') ||
+        url.contains('10.1.') ||
+        url.contains('172.16.') ||
+        url.contains('localhost') ||
+        url.contains('127.0.0.1') ||
+        RegExp(r'http://\d{1,3}\.\d{1,3}\.').hasMatch(url);
+  }
 
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('token');
     final savedUrl = prefs.getString('server_url');
-    if (savedUrl != null && savedUrl.isNotEmpty) {
-      _baseUrl = savedUrl;
+    if (savedUrl != null && savedUrl.isNotEmpty && !_isLocalUrl(savedUrl)) {
+      _baseUrl = _normalizeUrl(savedUrl);
+    } else {
+      // Si había una IP local guardada, resetear a producción y limpiarla
+      _baseUrl = _productionUrl;
+      await prefs.remove('server_url');
     }
   }
 
   static Future<void> setServerUrl(String url) async {
-    _baseUrl = url;
+    final normalized = _normalizeUrl(url);
+    _baseUrl = normalized;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server_url', url);
+    await prefs.setString('server_url', normalized);
   }
 
   static String get serverUrl => _baseUrl;
@@ -31,16 +63,19 @@ class ApiService {
   }
 
   static Map<String, String> get _headers => {
-    'Content-Type': 'application/json',
-    if (_token != null) 'Authorization': 'Bearer $_token',
-  };
+        'Content-Type': 'application/json',
+        if (_token != null) 'Authorization': 'Bearer $_token',
+      };
 
-  static Future<Map<String, dynamic>> login(String email, String password) async {
-    final res = await http.post(
-      Uri.parse('$_baseUrl/auth/login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
-    ).timeout(const Duration(seconds: 15));
+  static Future<Map<String, dynamic>> login(
+      String email, String password) async {
+    final res = await http
+        .post(
+          Uri.parse('$_baseUrl/auth/login'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'email': email, 'password': password}),
+        )
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       _token = data['token'];
@@ -49,20 +84,25 @@ class ApiService {
       await prefs.setString('user_name', data['name'] ?? '');
       return data;
     }
-    throw Exception(jsonDecode(res.body)['detail'] ?? 'Error al iniciar sesion');
+    throw Exception(
+        jsonDecode(res.body)['detail'] ?? 'Error al iniciar sesion');
   }
 
   static Future<Map<String, dynamic>> register(
       String name, String email, String password) async {
-    final res = await http.post(
-      Uri.parse('$_baseUrl/auth/register'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'name': name, 'email': email, 'password': password}),
-    ).timeout(const Duration(seconds: 15));
+    final res = await http
+        .post(
+          Uri.parse('$_baseUrl/auth/register'),
+          headers: {'Content-Type': 'application/json'},
+          body:
+              jsonEncode({'name': name, 'email': email, 'password': password}),
+        )
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode == 200) {
       return jsonDecode(res.body);
     }
-    throw Exception(jsonDecode(res.body)['detail'] ?? 'Error al registrarse');
+    throw Exception(
+        jsonDecode(res.body)['detail'] ?? 'Error al registrarse');
   }
 
   static Future<void> logout() async {
@@ -78,54 +118,73 @@ class ApiService {
   }
 
   static Future<List<Subject>> getSubjects() async {
-    final res = await http.get(
-      Uri.parse('$_baseUrl/subjects'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 15));
+    final res = await http
+        .get(
+          Uri.parse('$_baseUrl/subjects'),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode == 200) {
-      final List data = jsonDecode(res.body);
+      final body = jsonDecode(res.body);
+      // El backend devuelve {"subjects": [...]}
+      final List data = body is Map ? (body['subjects'] ?? []) : body;
       return data.map((j) => Subject.fromJson(j)).toList();
     }
-    throw Exception('Error al obtener materias');
+    throw Exception('Error al obtener materias (${res.statusCode})');
   }
 
-  static Future<Subject> createSubject(String name, String professor) async {
-    final res = await http.post(
-      Uri.parse('$_baseUrl/subjects'),
-      headers: _headers,
-      body: jsonEncode({'name': name, 'professor_name': professor}),
-    ).timeout(const Duration(seconds: 15));
-    if (res.statusCode == 200) {
+  static Future<Subject> createSubject(
+      String name, String professor) async {
+    final res = await http
+        .post(
+          Uri.parse('$_baseUrl/subjects'),
+          headers: _headers,
+          body: jsonEncode({'name': name, 'professor_name': professor}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode == 200 || res.statusCode == 201) {
       return Subject.fromJson(jsonDecode(res.body));
     }
-    throw Exception('Error al crear materia');
+    final detail = (() {
+      try {
+        return jsonDecode(res.body)['detail'] ?? 'Error al crear materia';
+      } catch (_) {
+        return 'Error al crear materia (${res.statusCode})';
+      }
+    })();
+    throw Exception(detail);
   }
 
   static Future<void> deleteSubject(String id) async {
-    await http.delete(
-      Uri.parse('$_baseUrl/subjects/$id'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 15));
+    await http
+        .delete(
+          Uri.parse('$_baseUrl/subjects/$id'),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 15));
   }
 
   static Future<List<Note>> getNotes({String? subjectId}) async {
     final uri = subjectId != null
         ? Uri.parse('$_baseUrl/notes?subject_id=$subjectId')
         : Uri.parse('$_baseUrl/notes');
-    final res = await http.get(uri, headers: _headers)
-        .timeout(const Duration(seconds: 15));
+    final res =
+        await http.get(uri, headers: _headers).timeout(const Duration(seconds: 15));
     if (res.statusCode == 200) {
-      final List data = jsonDecode(res.body);
+      final body = jsonDecode(res.body);
+      final List data = body is Map ? (body['notes'] ?? body) : body;
       return data.map((j) => Note.fromJson(j)).toList();
     }
     throw Exception('Error al obtener notas');
   }
 
   static Future<void> deleteNote(String id) async {
-    await http.delete(
-      Uri.parse('$_baseUrl/notes/$id'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 15));
+    await http
+        .delete(
+          Uri.parse('$_baseUrl/notes/$id'),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 15));
   }
 
   static Future<Note> processAudio(String filePath, String subjectId) async {
@@ -137,20 +196,26 @@ class ApiService {
     req.files.add(await http.MultipartFile.fromPath('audio_file', filePath));
     req.fields['subject_id'] = subjectId;
 
-    final streamed = await req.send().timeout(const Duration(minutes: 5));
+    final streamed =
+        await req.send().timeout(const Duration(minutes: 5));
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) {
       return Note.fromJson(jsonDecode(res.body));
     }
-    throw Exception(jsonDecode(res.body)['detail'] ?? 'Error al procesar audio');
+    throw Exception(
+        jsonDecode(res.body)['detail'] ?? 'Error al procesar audio');
   }
 
-  static Future<String> askQuestion(String question, String subjectId) async {
-    final res = await http.post(
-      Uri.parse('$_baseUrl/qa'),
-      headers: _headers,
-      body: jsonEncode({'question': question, 'subject_id': subjectId}),
-    ).timeout(const Duration(seconds: 30));
+  static Future<String> askQuestion(
+      String question, String subjectId) async {
+    final res = await http
+        .post(
+          Uri.parse('$_baseUrl/qa'),
+          headers: _headers,
+          body:
+              jsonEncode({'question': question, 'subject_id': subjectId}),
+        )
+        .timeout(const Duration(seconds: 30));
     if (res.statusCode == 200) {
       return jsonDecode(res.body)['answer'] ?? '';
     }
