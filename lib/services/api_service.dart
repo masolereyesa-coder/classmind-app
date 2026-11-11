@@ -74,7 +74,7 @@ class ApiService {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'email': email, 'password': password}),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       _token = data['token'];
@@ -96,7 +96,7 @@ class ApiService {
           body:
               jsonEncode({'name': name, 'email': email, 'password': password}),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (res.statusCode == 200) {
       return jsonDecode(res.body);
     }
@@ -121,7 +121,7 @@ class ApiService {
   static Future<List<Subject>> getSubjects() async {
     final res = await http
         .get(Uri.parse('$_baseUrl/subjects'), headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (res.statusCode == 200) {
       final body = jsonDecode(res.body);
       final List data = body is Map ? (body['subjects'] ?? []) : body;
@@ -138,7 +138,7 @@ class ApiService {
           headers: _headers,
           body: jsonEncode({'name': name, 'professor_name': professor}),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (res.statusCode == 200 || res.statusCode == 201) {
       return Subject.fromJson(jsonDecode(res.body));
     }
@@ -149,7 +149,7 @@ class ApiService {
   static Future<void> deleteSubject(String id) async {
     await http
         .delete(Uri.parse('$_baseUrl/subjects/$id'), headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
   }
 
   /// Sube el PDF de presentación de una materia.
@@ -179,7 +179,7 @@ class ApiService {
           Uri.parse('$_baseUrl/subjects/$subjectId/pdf'),
           headers: _headers,
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (res.statusCode != 200 && res.statusCode != 204) {
       throw Exception('Error al eliminar PDF (${res.statusCode})');
     }
@@ -193,7 +193,7 @@ class ApiService {
         : Uri.parse('$_baseUrl/notes');
     final res = await http
         .get(uri, headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (res.statusCode == 200) {
       final body = jsonDecode(res.body);
       final List data = body is Map ? (body['notes'] ?? body) : body;
@@ -205,7 +205,7 @@ class ApiService {
   static Future<void> deleteNote(String id) async {
     await http
         .delete(Uri.parse('$_baseUrl/notes/$id'), headers: _headers)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
   }
 
   static Future<Note> processAudio(
