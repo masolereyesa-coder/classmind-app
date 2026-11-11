@@ -21,8 +21,6 @@ class NoteScreen extends StatefulWidget {
 
 class _NoteScreenState extends State<NoteScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final ApiService _api = ApiService();
-
   late String _noteId;
   late String _subjectName;
   late String _transcript;
@@ -95,7 +93,7 @@ class _NoteScreenState extends State<NoteScreen> with SingleTickerProviderStateM
       _editError = null;
     });
     try {
-      await _api.updateNote(_noteId, _editController.text.trim());
+      await ApiService.updateNote(_noteId, _editController.text.trim());
       setState(() {
         _structuredNotes = _editController.text.trim();
         _isEditing = false;
