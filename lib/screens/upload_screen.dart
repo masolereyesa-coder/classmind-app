@@ -90,7 +90,7 @@ class _UploadScreenState extends State<UploadScreen> {
           '${dir.path}/cm_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
       await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
+        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 32000),
         path: path,
       );
 

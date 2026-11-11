@@ -219,7 +219,7 @@ class ApiService {
         await http.MultipartFile.fromPath('audio_file', filePath));
     req.fields['subject_id'] = subjectId;
 
-    final streamed = await req.send().timeout(const Duration(minutes: 5));
+    final streamed = await req.send().timeout(const Duration(minutes: 20));
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode == 200) {
       return Note.fromJson(jsonDecode(res.body));
