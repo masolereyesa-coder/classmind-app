@@ -1,7 +1,8 @@
 name: classmind
-description: ClassMind - Grabacion y notas inteligentes para clases universitarias.
+description: ClassMind - Grabación y notas inteligentes de clases
 publish_to: 'none'
-version: 1.3.0+12
+
+version: 1.0.0+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -9,16 +10,30 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  http: ^1.2.1
-  shared_preferences: ^2.2.3
-  file_picker: ^8.0.3
-  path_provider: ^2.1.3
-  permission_handler: ^11.3.1
-  flutter_markdown: ^0.6.22
-  intl: ^0.19.0
-  pdf: ^3.10.8
-  share_plus: ^10.1.0
-  record: ^7.0.0
+
+  # HTTP & Storage
+  http: ^1.1.0
+  shared_preferences: ^2.2.2
+
+  # Audio - grabación
+  record: ^5.0.0
+
+  # Audio - reproducción (NUEVO v7)
+  just_audio: ^0.9.36
+
+  # Archivos
+  file_picker: ^6.1.1
+  path_provider: ^2.1.1
+
+  # PDF / share
+  pdf: ^3.10.6
+  share_plus: ^7.2.1
+  printing: ^5.11.0
+
+  # UI
+  cupertino_icons: ^1.0.2
+  flutter_markdown: ^0.6.18
+  intl: ^0.18.1
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +42,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/

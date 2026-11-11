@@ -1,258 +1,373 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/subject.dart';
 import '../models/note.dart';
 
 class ApiService {
-  static const String _productionUrl =
+  static const String baseUrl =
       'https://classmind-backend-umtc.onrender.com/api/v1';
-  static String _baseUrl = _productionUrl;
-  static String? _token;
 
-  /// Normaliza la URL: elimina trailing slash y asegura que termine en /api/v1
-  static String _normalizeUrl(String url) {
-    url = url.trim().replaceAll(RegExp(r'/+$'), '');
-    if (!url.endsWith('/api/v1')) {
-      if (url.endsWith('/api')) {
-        url = '$url/v1';
-      } else if (!url.contains('/api/v1')) {
-        url = '$url/api/v1';
+  // ─── Claves en SharedPreferences ──────────────────────────────────────────
+  static const _keyToken = 'auth_token';
+  static const _keyRefreshToken = 'refresh_token';   // FIX v7
+  static const _keyUserId = 'user_id';
+  static const _keyEmail = 'user_email';
+  static const _keyName = 'user_name';
+
+  // ─── Almacenamiento de sesión ──────────────────────────────────────────────
+
+  Future<void> saveSession({
+    required String token,
+    required String refreshToken,
+    required String userId,
+    required String email,
+    required String name,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyToken, token);
+    await prefs.setString(_keyRefreshToken, refreshToken);  // FIX v7
+    await prefs.setString(_keyUserId, userId);
+    await prefs.setString(_keyEmail, email);
+    await prefs.setString(_keyName, name);
+  }
+
+  Future<void> clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyToken);
+    await prefs.remove(_keyRefreshToken);
+    await prefs.remove(_keyUserId);
+    await prefs.remove(_keyEmail);
+    await prefs.remove(_keyName);
+  }
+
+  Future<bool> isLoggedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyToken) != null;
+  }
+
+  Future<String?> getUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyUserId);
+  }
+
+  Future<String?> getUserName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyName);
+  }
+
+  // ─── FIX v7: Obtener token válido (refresca si expiró) ────────────────────
+
+  Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_keyToken);
+    if (token == null) return null;
+
+    // Verificar si el JWT ha expirado o expirará en los próximos 5 minutos
+    if (_isTokenExpiredOrExpiringSoon(token)) {
+      final refreshToken = prefs.getString(_keyRefreshToken);
+      if (refreshToken == null) return null;
+      try {
+        final newSession = await _refreshToken(refreshToken);
+        await prefs.setString(_keyToken, newSession['token']!);
+        await prefs.setString(_keyRefreshToken, newSession['refresh_token']!);
+        return newSession['token'];
+      } catch (e) {
+        // No se pudo refrescar — forzar re-login
+        await clearSession();
+        return null;
       }
     }
-    return url;
+
+    return token;
   }
 
-  /// Detecta IPs locales / localhost
-  static bool _isLocalUrl(String url) {
-    return url.contains('192.168.') ||
-        url.contains('10.0.') ||
-        url.contains('10.1.') ||
-        url.contains('172.16.') ||
-        url.contains('localhost') ||
-        url.contains('127.0.0.1') ||
-        RegExp(r'http://\d{1,3}\.\d{1,3}\.').hasMatch(url);
-  }
-
-  static Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    _token = prefs.getString('token');
-    final savedUrl = prefs.getString('server_url');
-    if (savedUrl != null && savedUrl.isNotEmpty && !_isLocalUrl(savedUrl)) {
-      _baseUrl = _normalizeUrl(savedUrl);
-    } else {
-      _baseUrl = _productionUrl;
-      await prefs.remove('server_url');
+  /// Decodifica el JWT y verifica si expira en < 5 minutos.
+  bool _isTokenExpiredOrExpiringSoon(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      final payload = utf8.decode(
+        base64Url.decode(base64Url.normalize(parts[1])),
+      );
+      final data = json.decode(payload) as Map<String, dynamic>;
+      final exp = data['exp'] as int?;
+      if (exp == null) return true;
+      final expiresAt = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+      return DateTime.now().isAfter(expiresAt.subtract(const Duration(minutes: 5)));
+    } catch (_) {
+      return true;
     }
   }
 
-  static Future<void> setServerUrl(String url) async {
-    final normalized = _normalizeUrl(url);
-    _baseUrl = normalized;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server_url', normalized);
-  }
-
-  static String get serverUrl => _baseUrl;
-
-  static void setToken(String token) {
-    _token = token;
-  }
-
-  static Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (_token != null) 'Authorization': 'Bearer $_token',
-      };
-
-  // ── AUTH ──────────────────────────────────────────────────────────────────
-
-  static Future<Map<String, dynamic>> login(
-      String email, String password) async {
-    final res = await http
+  /// Llama al endpoint /auth/refresh del backend.
+  Future<Map<String, String>> _refreshToken(String refreshToken) async {
+    final response = await http
         .post(
-          Uri.parse('$_baseUrl/auth/login'),
+          Uri.parse('$baseUrl/auth/refresh'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'email': email, 'password': password}),
+          body: json.encode({'refresh_token': refreshToken}),
         )
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-      _token = data['token'];
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', _token!);
-      await prefs.setString('user_name', data['name'] ?? '');
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      return {
+        'token': data['token'] as String,
+        'refresh_token': data['refresh_token'] as String,
+      };
+    }
+    throw Exception('No se pudo refrescar el token: ${response.statusCode}');
+  }
+
+  // ─── Cabecera de autorización ──────────────────────────────────────────────
+
+  Future<Map<String, String>> _authHeaders() async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Sesión expirada. Vuelve a iniciar sesión.');
+    return {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  // ─── AUTH ──────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> login(String email, String password) async {
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/auth/login'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'email': email, 'password': password}),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      await saveSession(
+        token: data['token'],
+        refreshToken: data['refresh_token'] ?? '',
+        userId: data['user_id'],
+        email: email,
+        name: data['name'] ?? '',
+      );
       return data;
     }
-    throw Exception(
-        jsonDecode(res.body)['detail'] ?? 'Error al iniciar sesion');
+    throw Exception('Credenciales inválidas');
   }
 
-  static Future<Map<String, dynamic>> register(
-      String name, String email, String password) async {
-    final res = await http
+  Future<Map<String, dynamic>> register(
+      String email, String password, String name) async {
+    final response = await http
         .post(
-          Uri.parse('$_baseUrl/auth/register'),
+          Uri.parse('$baseUrl/auth/register'),
           headers: {'Content-Type': 'application/json'},
-          body:
-              jsonEncode({'name': name, 'email': email, 'password': password}),
+          body: json.encode({'email': email, 'password': password, 'name': name}),
         )
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      await saveSession(
+        token: data['token'],
+        refreshToken: data['refresh_token'] ?? '',
+        userId: data['user_id'],
+        email: email,
+        name: name,
+      );
+      return data;
     }
-    throw Exception(
-        jsonDecode(res.body)['detail'] ?? 'Error al registrarse');
+    final body = json.decode(response.body);
+    throw Exception(body['detail'] ?? 'Error al registrar');
   }
 
-  static Future<void> logout() async {
-    _token = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('token');
-    await prefs.remove('user_name');
-  }
+  // ─── SUBJECTS ─────────────────────────────────────────────────────────────
 
-  static Future<String?> getSavedUserName() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('user_name');
-  }
-
-  // ── SUBJECTS ──────────────────────────────────────────────────────────────
-
-  static Future<List<Subject>> getSubjects() async {
-    final res = await http
-        .get(Uri.parse('$_baseUrl/subjects'), headers: _headers)
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode == 200) {
-      final body = jsonDecode(res.body);
-      final List data = body is Map ? (body['subjects'] ?? []) : body;
-      return data.map((j) => Subject.fromJson(j)).toList();
+  Future<List<dynamic>> getSubjects() async {
+    final headers = await _authHeaders();
+    final response = await http
+        .get(Uri.parse('$baseUrl/subjects'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return data['subjects'] as List;
     }
-    throw Exception('Error al obtener materias (${res.statusCode})');
+    throw Exception('Error obteniendo materias: ${response.statusCode}');
   }
 
-  static Future<Subject> createSubject(
-      String name, String professor) async {
-    final res = await http
+  Future<Map<String, dynamic>> createSubject(
+      String name, String? professorName) async {
+    final headers = await _authHeaders();
+    final response = await http
         .post(
-          Uri.parse('$_baseUrl/subjects'),
-          headers: _headers,
-          body: jsonEncode({'name': name, 'professor_name': professor}),
+          Uri.parse('$baseUrl/subjects'),
+          headers: headers,
+          body: json.encode({
+            'name': name,
+            if (professorName != null && professorName.isNotEmpty)
+              'professor_name': professorName,
+          }),
         )
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode == 200 || res.statusCode == 201) {
-      return Subject.fromJson(jsonDecode(res.body));
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
     }
-    final detail = _extractDetail(res.body, 'Error al crear materia');
-    throw Exception('$detail (${res.statusCode})');
+    throw Exception('Error creando materia');
   }
 
-  static Future<void> deleteSubject(String id) async {
-    await http
-        .delete(Uri.parse('$_baseUrl/subjects/$id'), headers: _headers)
-        .timeout(const Duration(seconds: 60));
+  Future<void> deleteSubject(String subjectId) async {
+    final headers = await _authHeaders();
+    final response = await http
+        .delete(Uri.parse('$baseUrl/subjects/$subjectId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('Error eliminando materia');
+    }
   }
 
-  /// Sube el PDF de presentación de una materia.
-  static Future<Map<String, dynamic>> uploadSubjectPdf(
-      String subjectId, String filePath) async {
-    final req = http.MultipartRequest(
+  Future<void> uploadPdf(String subjectId, File pdfFile) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Sesión expirada');
+    final request = http.MultipartRequest(
       'POST',
-      Uri.parse('$_baseUrl/subjects/$subjectId/pdf'),
-    );
-    req.headers['Authorization'] = 'Bearer $_token';
-    req.files.add(
-        await http.MultipartFile.fromPath('pdf_file', filePath));
-
-    final streamed = await req.send().timeout(const Duration(minutes: 2));
-    final res = await http.Response.fromStream(streamed);
-    if (res.statusCode == 200 || res.statusCode == 201) {
-      return jsonDecode(res.body);
+      Uri.parse('$baseUrl/subjects/$subjectId/pdf'),
+    )
+      ..headers['Authorization'] = 'Bearer $token'
+      ..files.add(await http.MultipartFile.fromPath('pdf_file', pdfFile.path));
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
+    if (streamed.statusCode != 200) {
+      throw Exception('Error subiendo PDF: ${streamed.statusCode}');
     }
-    final detail = _extractDetail(res.body, 'Error al subir PDF');
-    throw Exception('$detail (${res.statusCode})');
   }
 
-  /// Elimina el PDF de una materia.
-  static Future<void> deleteSubjectPdf(String subjectId) async {
-    final res = await http
-        .delete(
-          Uri.parse('$_baseUrl/subjects/$subjectId/pdf'),
-          headers: _headers,
+  Future<void> deletePdf(String subjectId) async {
+    final headers = await _authHeaders();
+    await http
+        .delete(Uri.parse('$baseUrl/subjects/$subjectId/pdf'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+  }
+
+  // ─── AUDIO ────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> processAudio({
+    required File audioFile,
+    required String subjectId,
+    void Function(String status)? onStatus,
+  }) async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Sesión expirada. Vuelve a iniciar sesión.');
+
+    onStatus?.call('Subiendo audio...');
+
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/process-audio'),
+    )
+      ..headers['Authorization'] = 'Bearer $token'
+      ..fields['subject_id'] = subjectId
+      ..files.add(await http.MultipartFile.fromPath(
+        'audio_file',
+        audioFile.path,
+        // FIX v7: pasar filename con extensión para que el backend lo detecte
+        filename: audioFile.path.split('/').last,
+      ));
+
+    onStatus?.call('Transcribiendo con Whisper...');
+
+    final streamedResponse = await request.send().timeout(
+      const Duration(minutes: 20),
+      onTimeout: () => throw Exception(
+          'Tiempo de espera agotado. El audio puede ser muy largo.'),
+    );
+
+    onStatus?.call('Generando notas con IA...');
+
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
+    }
+
+    if (response.statusCode == 401) {
+      await clearSession();
+      throw Exception('Sesión expirada. Vuelve a iniciar sesión.');
+    }
+
+    final body = json.decode(response.body);
+    throw Exception(body['detail'] ?? 'Error procesando audio (${response.statusCode})');
+  }
+
+  // ─── NOTES ────────────────────────────────────────────────────────────────
+
+  Future<List<Note>> getNotes() async {
+    final headers = await _authHeaders();
+    final response = await http
+        .get(Uri.parse('$baseUrl/notes'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return (data['notes'] as List)
+          .map((n) => Note.fromJson(n as Map<String, dynamic>))
+          .toList();
+    }
+    throw Exception('Error obteniendo notas');
+  }
+
+  Future<Note> getNote(String noteId) async {
+    final headers = await _authHeaders();
+    final response = await http
+        .get(Uri.parse('$baseUrl/notes/$noteId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 200) {
+      return Note.fromJson(json.decode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Nota no encontrada');
+  }
+
+  Future<void> deleteNote(String noteId) async {
+    final headers = await _authHeaders();
+    final response = await http
+        .delete(Uri.parse('$baseUrl/notes/$noteId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('Error eliminando nota');
+    }
+  }
+
+  // FIX v7: Actualizar notas estructuradas (edición)
+  Future<void> updateNote(String noteId, String structuredNotes) async {
+    final headers = await _authHeaders();
+    final response = await http
+        .patch(
+          Uri.parse('$baseUrl/notes/$noteId'),
+          headers: headers,
+          body: json.encode({'structured_notes': structuredNotes}),
         )
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode != 200 && res.statusCode != 204) {
-      throw Exception('Error al eliminar PDF (${res.statusCode})');
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('Error guardando cambios: ${response.statusCode}');
     }
   }
 
-  // ── NOTES ─────────────────────────────────────────────────────────────────
+  // ─── Q&A ──────────────────────────────────────────────────────────────────
 
-  static Future<List<Note>> getNotes({String? subjectId}) async {
-    final uri = subjectId != null
-        ? Uri.parse('$_baseUrl/notes?subject_id=$subjectId')
-        : Uri.parse('$_baseUrl/notes');
-    final res = await http
-        .get(uri, headers: _headers)
-        .timeout(const Duration(seconds: 60));
-    if (res.statusCode == 200) {
-      final body = jsonDecode(res.body);
-      final List data = body is Map ? (body['notes'] ?? body) : body;
-      return data.map((j) => Note.fromJson(j)).toList();
-    }
-    throw Exception('Error al obtener notas (${res.statusCode})');
-  }
-
-  static Future<void> deleteNote(String id) async {
-    await http
-        .delete(Uri.parse('$_baseUrl/notes/$id'), headers: _headers)
-        .timeout(const Duration(seconds: 60));
-  }
-
-  static Future<Note> processAudio(
-      String filePath, String subjectId) async {
-    final req = http.MultipartRequest(
-      'POST',
-      Uri.parse('$_baseUrl/process-audio'),
-    );
-    req.headers['Authorization'] = 'Bearer $_token';
-    req.files.add(
-        await http.MultipartFile.fromPath('audio_file', filePath));
-    req.fields['subject_id'] = subjectId;
-
-    final streamed = await req.send().timeout(const Duration(minutes: 20));
-    final res = await http.Response.fromStream(streamed);
-    if (res.statusCode == 200) {
-      return Note.fromJson(jsonDecode(res.body));
-    }
-    final detail = _extractDetail(res.body, 'Error al procesar audio');
-    throw Exception(detail);
-  }
-
-  // ── Q&A ───────────────────────────────────────────────────────────────────
-
-  static Future<String> askQuestion(
-      String question, String subjectId) async {
-    final res = await http
+  // FIX v7: eliminado user_id del body (backend lo obtiene del token)
+  Future<String> askQuestion(String question, String subjectId) async {
+    final headers = await _authHeaders();
+    final response = await http
         .post(
-          Uri.parse('$_baseUrl/qa'),
-          headers: _headers,
-          body: jsonEncode(
-              {'question': question, 'subject_id': subjectId}),
+          Uri.parse('$baseUrl/qa'),
+          headers: headers,
+          body: json.encode({
+            'question': question,
+            'subject_id': subjectId,
+          }),
         )
         .timeout(const Duration(seconds: 30));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body)['answer'] ?? '';
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return data['answer'] as String;
     }
-    throw Exception('Error al obtener respuesta');
-  }
-
-  // ── HELPERS ───────────────────────────────────────────────────────────────
-
-  static String _extractDetail(String body, String fallback) {
-    try {
-      return jsonDecode(body)['detail'] ?? fallback;
-    } catch (_) {
-      return fallback;
-    }
+    throw Exception('Error en Q&A: ${response.statusCode}');
   }
 }

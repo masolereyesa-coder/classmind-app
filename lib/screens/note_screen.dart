@@ -1,221 +1,234 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import '../models/note.dart';
-import '../l10n/strings.dart';
+import '../services/api_service.dart';
 
 class NoteScreen extends StatefulWidget {
-  final Note note;
-  const NoteScreen({super.key, required this.note});
+  final Map<String, dynamic>? noteData;
+  final Note? note;
+
+  const NoteScreen({super.key, this.noteData, this.note});
+
   @override
   State<NoteScreen> createState() => _NoteScreenState();
 }
 
 class _NoteScreenState extends State<NoteScreen> with SingleTickerProviderStateMixin {
-  late TabController _tab;
-  bool _showTranscript = false;
+  late TabController _tabController;
+  final ApiService _api = ApiService();
+
+  late String _noteId;
+  late String _subjectName;
+  late String _transcript;
+  late String _structuredNotes;
+  late int _durationSeconds;
+  late String _createdAt;
+
+  // FIX v7: modo edición
+  bool _isEditing = false;
+  bool _isSaving = false;
+  late TextEditingController _editController;
+  String? _editError;
 
   @override
-  void initState() { super.initState(); _tab = TabController(length: 2, vsync: this); }
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+
+    if (widget.noteData != null) {
+      final d = widget.noteData!;
+      _noteId = d['id'] ?? '';
+      _subjectName = d['subject_name'] ?? '';
+      _transcript = d['transcript'] ?? '';
+      _structuredNotes = d['structured_notes'] ?? '';
+      _durationSeconds = d['duration_seconds'] ?? 0;
+      _createdAt = d['created_at'] ?? '';
+    } else if (widget.note != null) {
+      final n = widget.note!;
+      _noteId = n.id;
+      _subjectName = n.subjectName;
+      _transcript = n.transcript;
+      _structuredNotes = n.structuredNotes;
+      _durationSeconds = n.durationSeconds;
+      _createdAt = n.createdAt;
+    } else {
+      _noteId = '';
+      _subjectName = '';
+      _transcript = '';
+      _structuredNotes = '';
+      _durationSeconds = 0;
+      _createdAt = '';
+    }
+
+    _editController = TextEditingController(text: _structuredNotes);
+  }
 
   @override
-  void dispose() { _tab.dispose(); super.dispose(); }
+  void dispose() {
+    _tabController.dispose();
+    _editController.dispose();
+    super.dispose();
+  }
 
-  String _formatDate(String iso) {
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '—';
+    final m = seconds ~/ 60;
+    final s = seconds % 60;
+    return '${m}m ${s.toString().padLeft(2, '0')}s';
+  }
+
+  // ─── FIX v7: Guardar edición ──────────────────────────────────────────────
+
+  Future<void> _saveEdit() async {
+    if (_noteId.isEmpty) {
+      _showSnack('Esta nota aún no está guardada en el servidor.');
+      return;
+    }
+    setState(() {
+      _isSaving = true;
+      _editError = null;
+    });
     try {
-      final d = DateTime.parse(iso);
-      return '${d.day} ${S.month(d.month)} ${d.year}';
-    } catch (_) { return iso.split('T').first; }
-  }
-
-  List<_Section> _parseSections(String text) {
-    final sections = <_Section>[];
-    final lines = text.split('\n');
-    String? currentTitle;
-    final buffer = StringBuffer();
-    for (final line in lines) {
-      if (line.startsWith('## ')) {
-        if (currentTitle != null) { sections.add(_Section(currentTitle, buffer.toString().trim())); buffer.clear(); }
-        currentTitle = line.substring(3).trim();
-      } else if (line.startsWith('# ')) {
-        // skip H1
-      } else if (currentTitle != null) { buffer.writeln(line); }
+      await _api.updateNote(_noteId, _editController.text.trim());
+      setState(() {
+        _structuredNotes = _editController.text.trim();
+        _isEditing = false;
+        _isSaving = false;
+      });
+      _showSnack('Notas guardadas ✅');
+    } catch (e) {
+      setState(() {
+        _editError = e.toString().replaceFirst('Exception: ', '');
+        _isSaving = false;
+      });
     }
-    if (currentTitle != null) sections.add(_Section(currentTitle, buffer.toString().trim()));
-    if (sections.isEmpty && text.isNotEmpty) sections.add(_Section(S.notes, text));
-    return sections;
   }
 
-  IconData _sectionIcon(String title) {
-    final t = title.toLowerCase();
-    if (t.contains('resumen') || t.contains('tema') || t.contains('summary')) return Icons.summarize;
-    if (t.contains('concepto') || t.contains('clave') || t.contains('key'))    return Icons.key;
-    if (t.contains('desarrollo') || t.contains('contenido'))                   return Icons.article;
-    if (t.contains('ejemplo') || t.contains('caso') || t.contains('example'))  return Icons.lightbulb_outline;
-    if (t.contains('importante') || t.contains('punto'))                       return Icons.star_outline;
-    if (t.contains('pregunta') || t.contains('examen') || t.contains('question')) return Icons.quiz_outlined;
-    return Icons.notes;
+  void _cancelEdit() {
+    _editController.text = _structuredNotes;
+    setState(() {
+      _isEditing = false;
+      _editError = null;
+    });
   }
 
-  Color _sectionColor(int index) {
-    const colors = [Color(0xFF6C63FF), Color(0xFF43B89C), Color(0xFFFF6B6B), Color(0xFFFFB84C), Color(0xFF4ECDC4), Color(0xFF7C83FD)];
-    return colors[index % colors.length];
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  Future<void> _exportTxt() async {
-    final sections = _parseSections(widget.note.structuredNotes);
-    final buf = StringBuffer();
-    buf.writeln('ClassMind — ${widget.note.subjectName}');
-    buf.writeln(_formatDate(widget.note.createdAt));
-    buf.writeln('=' * 40);
-    for (final sec in sections) {
-      buf.writeln('\n## ${sec.title}');
-      buf.writeln(sec.content);
-    }
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/classmind_nota.txt');
-    await file.writeAsString(buf.toString());
-    await Share.shareXFiles([XFile(file.path)], subject: 'ClassMind — ${widget.note.subjectName}');
-  }
+  // ─── Compartir como PDF ───────────────────────────────────────────────────
 
-  Future<void> _exportPdf() async {
-    final sections = _parseSections(widget.note.structuredNotes);
-    final doc = pw.Document();
-    doc.addPage(
-      pw.MultiPage(
+  Future<void> _shareAsPdf() async {
+    try {
+      final pdfDoc = pw.Document();
+      pdfDoc.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
         build: (ctx) => [
-          pw.Text('ClassMind', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColors.deepPurple700)),
-          pw.SizedBox(height: 4),
-          pw.Text(widget.note.subjectName, style: pw.TextStyle(fontSize: 16, color: PdfColors.grey700)),
-          pw.Text(_formatDate(widget.note.createdAt), style: pw.TextStyle(fontSize: 12, color: PdfColors.grey500)),
-          pw.Divider(color: PdfColors.deepPurple200),
+          pw.Text(_subjectName,
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 8),
-          for (final sec in sections) ...[
-            pw.Text(sec.title, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.deepPurple700)),
-            pw.SizedBox(height: 4),
-            pw.Text(sec.content, style: const pw.TextStyle(fontSize: 11, lineSpacing: 2)),
-            pw.SizedBox(height: 12),
-          ],
+          pw.Text('Duración: ${_formatDuration(_durationSeconds)}',
+              style: const pw.TextStyle(fontSize: 12)),
+          pw.SizedBox(height: 20),
+          pw.Text('NOTAS ESTRUCTURADAS',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Text(_structuredNotes),
+          pw.SizedBox(height: 20),
+          pw.Text('TRANSCRIPCIÓN',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Text(_transcript),
         ],
-      ),
-    );
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/classmind_nota.pdf');
-    await file.writeAsBytes(await doc.save());
-    await Share.shareXFiles([XFile(file.path)], subject: 'ClassMind — ${widget.note.subjectName}');
+      ));
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/classmind_nota.pdf');
+      await file.writeAsBytes(await pdfDoc.save());
+      await Share.shareXFiles([XFile(file.path)], subject: 'Nota: $_subjectName');
+    } catch (e) {
+      _showSnack('Error generando PDF: $e');
+    }
   }
+
+  Future<void> _copyTranscript() async {
+    await Clipboard.setData(ClipboardData(text: _transcript));
+    _showSnack('Transcripción copiada al portapapeles');
+  }
+
+  // ─── UI ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final sections = _parseSections(widget.note.structuredNotes);
     return Scaffold(
       appBar: AppBar(
-        title: Text('${S.classNotes}: ${widget.note.subjectName}'),
+        title: Text(_subjectName.isEmpty ? 'Nota' : _subjectName),
+        backgroundColor: Colors.indigo,
+        foregroundColor: Colors.white,
         actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.download),
-            tooltip: 'Exportar',
-            onSelected: (val) { if (val == 'pdf') _exportPdf(); else _exportTxt(); },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 'pdf', child: Row(children: [const Icon(Icons.picture_as_pdf, color: Color(0xFFFF6B6B)), const SizedBox(width: 8), Text(S.exportPdf)])),
-              PopupMenuItem(value: 'txt', child: Row(children: [const Icon(Icons.text_snippet, color: Color(0xFF43B89C)), const SizedBox(width: 8), Text(S.exportTxt)])),
-            ],
+          // FIX v7: botón editar / guardar
+          if (!_isEditing)
+            IconButton(
+              icon: const Icon(Icons.edit),
+              tooltip: 'Editar notas',
+              onPressed: () {
+                _tabController.animateTo(0); // Ir a pestaña Notas
+                setState(() => _isEditing = true);
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf),
+            tooltip: 'Compartir PDF',
+            onPressed: _shareAsPdf,
           ),
         ],
         bottom: TabBar(
-          controller: _tab,
-          indicatorColor: Colors.white,
+          controller: _tabController,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
-          tabs: [
-            Tab(text: S.notes, icon: const Icon(Icons.notes, size: 18)),
-            Tab(text: S.info,  icon: const Icon(Icons.info_outline, size: 18)),
+          tabs: const [
+            Tab(text: 'Notas', icon: Icon(Icons.notes)),
+            Tab(text: 'Transcripción', icon: Icon(Icons.text_snippet)),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tab,
+      body: Column(
         children: [
-          ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: sections.length,
-            itemBuilder: (ctx, i) {
-              final sec   = sections[i];
-              final color = _sectionColor(i);
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                color: const Color(0xFF1E1E1E),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                elevation: 2,
-                child: Theme(
-                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                  child: ExpansionTile(
-                    leading: CircleAvatar(backgroundColor: color.withOpacity(0.2), child: Icon(_sectionIcon(sec.title), color: color, size: 20)),
-                    title: Text(sec.title, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-                    initiallyExpanded: i == 0,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: SelectableText(sec.content, style: const TextStyle(fontSize: 14, height: 1.6, color: Colors.white70)),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // Info de duración
+          Container(
+            color: Colors.indigo.shade50,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
               children: [
-                _InfoCard(icon: Icons.menu_book,    label: S.subject,   value: widget.note.subjectName),
-                const SizedBox(height: 12),
-                _InfoCard(icon: Icons.calendar_today, label: S.date,    value: _formatDate(widget.note.createdAt)),
-                const SizedBox(height: 12),
-                _InfoCard(icon: Icons.timer,         label: S.duration, value: widget.note.duration),
-                const SizedBox(height: 20),
-                Row(children: [
-                  Text(S.transcript, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const Spacer(),
-                  TextButton(onPressed: () => setState(() => _showTranscript = !_showTranscript),
-                    child: Text(_showTranscript ? S.hide : S.show)),
-                ]),
-                if (_showTranscript) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: const Color(0xFF1A1A2E), borderRadius: BorderRadius.circular(12)),
-                    child: SelectableText(
-                      widget.note.transcript.isEmpty ? S.noTranscript : widget.note.transcript,
-                      style: const TextStyle(fontSize: 13, height: 1.6, color: Colors.white70)),
+                const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text('Duración: ${_formatDuration(_durationSeconds)}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const Spacer(),
+                if (_createdAt.isNotEmpty)
+                  Text(
+                    _createdAt.length > 10 ? _createdAt.substring(0, 10) : _createdAt,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-                ],
-                const SizedBox(height: 24),
-                Row(children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _exportPdf,
-                      icon: const Icon(Icons.picture_as_pdf, color: Color(0xFFFF6B6B)),
-                      label: Text(S.exportPdf, style: const TextStyle(color: Color(0xFFFF6B6B))),
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFFF6B6B))),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _exportTxt,
-                      icon: const Icon(Icons.text_snippet, color: Color(0xFF43B89C)),
-                      label: Text(S.exportTxt, style: const TextStyle(color: Color(0xFF43B89C))),
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFF43B89C))),
-                    ),
-                  ),
-                ]),
+              ],
+            ),
+          ),
+
+          // Tabs
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // ── Tab 0: Notas estructuradas ──────────────────────────
+                _buildNotesTab(),
+
+                // ── Tab 1: Transcripción ────────────────────────────────
+                _buildTranscriptTab(),
               ],
             ),
           ),
@@ -223,30 +236,118 @@ class _NoteScreenState extends State<NoteScreen> with SingleTickerProviderStateM
       ),
     );
   }
-}
 
-class _Section { final String title; final String content; _Section(this.title, this.content); }
+  Widget _buildNotesTab() {
+    if (_isEditing) {
+      // FIX v7: modo edición
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('✏️ Editando notas',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    TextButton(onPressed: _isSaving ? null : _cancelEdit,
+                        child: const Text('Cancelar')),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _isSaving ? null : _saveEdit,
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo,
+                          foregroundColor: Colors.white),
+                      child: _isSaving
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Text('Guardar'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (_editError != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Text(_editError!,
+                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Expanded(
+              child: TextField(
+                controller: _editController,
+                maxLines: null,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: 'Escribe las notas aquí (Markdown soportado)...',
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
-class _InfoCard extends StatelessWidget {
-  final IconData icon; final String label; final String value;
-  const _InfoCard({required this.icon, required this.label, required this.value});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
+    // Vista normal (Markdown)
+    if (_structuredNotes.isEmpty) {
+      return const Center(
+          child: Text('No hay notas generadas',
+              style: TextStyle(color: Colors.grey)));
+    }
+    return Markdown(
+      data: _structuredNotes,
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
+      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+        h1: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.indigo),
+        h2: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.indigo),
+        h3: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+        p: const TextStyle(fontSize: 14, height: 1.5),
       ),
-      child: Row(children: [
-        Icon(icon, color: const Color(0xFF6C63FF), size: 22),
-        const SizedBox(width: 12),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          Text(value,  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.white)),
-        ]),
-      ]),
+    );
+  }
+
+  Widget _buildTranscriptTab() {
+    if (_transcript.isEmpty) {
+      return const Center(
+          child: Text('Sin transcripción', style: TextStyle(color: Colors.grey)));
+    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copiar'),
+                onPressed: _copyTranscript,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SelectableText(
+              _transcript,
+              style: const TextStyle(fontSize: 14, height: 1.6),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
